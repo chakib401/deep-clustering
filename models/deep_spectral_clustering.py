@@ -6,6 +6,7 @@ from sklearn.neighbors import kneighbors_graph
 import numpy as np
 
 
+
 class DeepSpectralClusteringAutoEncoder(tf.keras.Model):
     def __init__(self,
                  original_dim,
@@ -13,6 +14,7 @@ class DeepSpectralClusteringAutoEncoder(tf.keras.Model):
                  lmbda=.1,
                  name='deep-spectral-clustering',
                  normalize=False,
+                 n_neighbors=10,
                  **kwargs):
         super(DeepSpectralClusteringAutoEncoder, self).__init__(name=name, **kwargs)
         self.original_dim = original_dim
@@ -23,9 +25,9 @@ class DeepSpectralClusteringAutoEncoder(tf.keras.Model):
         self.dense2 = tf.keras.layers.Dense(500, activation="relu")
         self.dense3 = tf.keras.layers.Dense(2000, activation="relu")
         self.embedding = tf.keras.layers.Dense(n_clusters)
-        self.dense4 = tf.keras.layers.Dense(500, activation="relu")
+        self.dense4 = tf.keras.layers.Dense(2000, activation="relu")
         self.dense5 = tf.keras.layers.Dense(500, activation="relu")
-        self.dense6 = tf.keras.layers.Dense(2000, activation="relu")
+        self.dense6 = tf.keras.layers.Dense(500, activation="relu")
         self.out = tf.keras.layers.Dense(original_dim)
         # clustering
         self.embeddings = None
@@ -35,11 +37,12 @@ class DeepSpectralClusteringAutoEncoder(tf.keras.Model):
         self.n_clusters = n_clusters
         self.rec_loss_fn = tf.keras.losses.MeanSquaredError()
         self.B = None
+        self.n_neighbors = n_neighbors
 
     def call(self, inputs, **kwargs):
         if self.training:
-            inputs = inputs[:, self.n_clusters:]
             B = inputs[:, :self.n_clusters]
+            inputs = inputs[:, self.n_clusters:]
         x = self.dense1(inputs)
         x = self.dense2(x)
         x = self.dense3(x)
@@ -51,6 +54,7 @@ class DeepSpectralClusteringAutoEncoder(tf.keras.Model):
         self.add_loss(self.rec_loss_fn(reconstructed, inputs))
         if self.training:
             self.add_loss(self.lmbda * self.rec_loss_fn(z, B))
+            # return B
         return z
 
     def pre_train(self,
@@ -91,15 +95,18 @@ class DeepSpectralClusteringAutoEncoder(tf.keras.Model):
                 use_multiprocessing=False):
         self.training = False
         predictions = super(DeepSpectralClusteringAutoEncoder, self).predict(x, batch_size, verbose, steps, callbacks,
-                                                                      max_queue_size, workers, use_multiprocessing)
+                                                                             max_queue_size, workers,
+                                                                             use_multiprocessing)
         self.training = True
         return predictions
 
     def spectral_update(self):
         G = np.eye(self.centroids.shape[0])[self.assignments]
-        dist_matrix = kneighbors_graph(self.embeddings, n_neighbors=10, mode="distance")
-        W = csr_matrix((np.exp(-dist_matrix.data ** 2 / 2) / (np.std(self.embeddings) ** 2),
-                        dist_matrix.indices, dist_matrix.indptr), shape=dist_matrix.shape)
+        dist_matrix = kneighbors_graph(self.embeddings, n_neighbors=self.n_neighbors, mode="distance")
+        m = np.mean(dist_matrix.data)
+        v = np.var(self.embeddings)
+        normalized_data = np.exp(-((dist_matrix.data - m) ** 2) / (2 * v))
+        W = csr_matrix((normalized_data, dist_matrix.indices, dist_matrix.indptr), shape=dist_matrix.shape)
         if self.normalize:
             D_12 = scipy.sparse.diags(np.asarray(W.sum(axis=1)).ravel() ** (-1 / 2))
             W = D_12 @ W @ D_12

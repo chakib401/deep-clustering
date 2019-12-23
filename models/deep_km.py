@@ -28,9 +28,9 @@ class DeepKMeansAutoEncoder(tf.keras.Model):
         self.dense2 = tf.keras.layers.Dense(500, activation="relu")
         self.dense3 = tf.keras.layers.Dense(2000, activation="relu")
         self.embedding = tf.keras.layers.Dense(n_clusters)
-        self.dense4 = tf.keras.layers.Dense(500, activation="relu")
+        self.dense4 = tf.keras.layers.Dense(2000, activation="relu")
         self.dense5 = tf.keras.layers.Dense(500, activation="relu")
-        self.dense6 = tf.keras.layers.Dense(2000, activation="relu")
+        self.dense6 = tf.keras.layers.Dense(500, activation="relu")
         self.out = tf.keras.layers.Dense(original_dim)
         # clustering
         self.embeddings = None
@@ -76,7 +76,7 @@ class DeepKMeansAutoEncoder(tf.keras.Model):
         for epoch in range(epochs):
             if kwargs['verbose'] != 0:
                 print("Epoch %d/%d" % (epoch+1, epochs))
-            self.fit(inputs, inputs, epochs=epochs, batch_size=batch_size, **kwargs)
+            self.fit(inputs, inputs, epochs=1, batch_size=batch_size, **kwargs)
             km = KMeans(n_clusters=self.n_clusters)
             self.embeddings = self.predict(inputs)
             km.fit(self.embeddings)
