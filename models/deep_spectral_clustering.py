@@ -15,11 +15,13 @@ class DeepSpectralClusteringAutoEncoder(tf.keras.Model):
                  name='deep-spectral-clustering',
                  normalize=False,
                  n_neighbors=10,
+                 gamma=1,
                  **kwargs):
         super(DeepSpectralClusteringAutoEncoder, self).__init__(name=name, **kwargs)
         self.original_dim = original_dim
         self.training = True
         self.normalize = normalize
+        self.gamma = gamma
         # layers
         self.dense1 = tf.keras.layers.Dense(500, input_dim=original_dim, activation="relu")
         self.dense2 = tf.keras.layers.Dense(500, activation="relu")
@@ -54,7 +56,6 @@ class DeepSpectralClusteringAutoEncoder(tf.keras.Model):
         self.add_loss(self.rec_loss_fn(reconstructed, inputs))
         if self.training:
             self.add_loss(self.lmbda * self.rec_loss_fn(z, B))
-            # return B
         return z
 
     def pre_train(self,
@@ -70,6 +71,7 @@ class DeepSpectralClusteringAutoEncoder(tf.keras.Model):
               epochs=10,
               batch_size=64,
               **kwargs):
+
         self.embeddings = self.predict(inputs)
         km = KMeans(n_clusters=self.n_clusters)
         km.fit(self.embeddings)
@@ -77,12 +79,18 @@ class DeepSpectralClusteringAutoEncoder(tf.keras.Model):
         self.centroids = km.cluster_centers_
         self.spectral_update()
         self.training = True
+
+        histories = []
         for epoch in range(epochs):
             if kwargs['verbose'] != 0:
                 print("Epoch %d/%d" % (epoch+1, epochs))
-            self.fit(np.hstack([self.B, inputs]), inputs, epochs=1, batch_size=batch_size, **kwargs)
+            hist = self.fit(np.hstack([self.B, inputs]), inputs, epochs=1,
+                            batch_size=batch_size, **kwargs)
+            histories.append(hist.history['loss'])
             self.embeddings = self.predict(inputs)
             self.spectral_update()
+        return [x[0] for x in histories]
+
 
     def predict(self,
                 x,
@@ -103,13 +111,14 @@ class DeepSpectralClusteringAutoEncoder(tf.keras.Model):
     def spectral_update(self):
         G = np.eye(self.centroids.shape[0])[self.assignments]
         dist_matrix = kneighbors_graph(self.embeddings, n_neighbors=self.n_neighbors, mode="distance")
-        m = np.mean(dist_matrix.data)
-        v = np.var(self.embeddings)
-        normalized_data = np.exp(-((dist_matrix.data - m) ** 2) / (2 * v))
-        W = csr_matrix((normalized_data, dist_matrix.indices, dist_matrix.indptr), shape=dist_matrix.shape)
+        rbf_kernel = np.exp(-(dist_matrix.data ** 2) / (2 * self.gamma))
+
+        W = csr_matrix((rbf_kernel, dist_matrix.indices, dist_matrix.indptr),
+                       shape=dist_matrix.shape)
         if self.normalize:
-            D_12 = scipy.sparse.diags(np.asarray(W.sum(axis=1)).ravel() ** (-1 / 2))
+            D_12 = scipy.sparse.diags(1/np.sqrt(np.asarray(W.sum(axis=1)).ravel()))
             W = D_12 @ W @ D_12
+
         U, _, Vt = scipy.linalg.svd(W @ G @ self.centroids + self.lmbda * self.embeddings,
                                     full_matrices=False)
         self.B = U @ Vt
